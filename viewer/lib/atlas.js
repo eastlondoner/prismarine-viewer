@@ -15,14 +15,16 @@ function nextPowerOfTwo (n) {
 
 function readTexture (basePath, name) {
   if (name === 'missing_texture.png') {
-    // grab ./missing_texture.png
-    basePath = __dirname
+    // grab missing_texture.png from the viewer lib directory
+    // Note: __dirname would be baked in at compile time by Bun, so we use a runtime global
+    basePath = globalThis.__prismarineViewerBase + '/viewer/lib'
   }
   return fs.readFileSync(path.join(basePath, name), 'base64')
 }
 
 function makeTextureAtlas (mcAssets) {
-  const blocksTexturePath = path.join(mcAssets.directory, '/blocks')
+  // Note: Use runtime global for Bun bundler compatibility
+  const blocksTexturePath = path.join(globalThis.__prismarineViewerBase + '/textures/' + mcAssets.version, 'blocks')
   const textureFiles = fs.readdirSync(blocksTexturePath).filter(file => file.endsWith('.png'))
   textureFiles.unshift('missing_texture.png')
 

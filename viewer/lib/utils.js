@@ -5,7 +5,7 @@ function safeRequire (path) {
     return {}
   }
 }
-const { loadImage } = safeRequire('node-canvas-webgl/lib')
+const { loadImage } = globalThis.__canvasModule || safeRequire('node-canvas-webgl/lib')
 const THREE = require('three')
 const path = require('path')
 
@@ -19,7 +19,7 @@ function loadTexture (texture, cb) {
   if (textureCache[texture]) {
     cb(textureCache[texture])
   } else {
-    loadImage(path.resolve(__dirname, '../../public/' + texture)).then(image => {
+    loadImage(path.resolve(globalThis.__prismarineViewerBase, texture)).then(image => {
       textureCache[texture] = new THREE.CanvasTexture(image)
       cb(textureCache[texture])
     })
@@ -30,7 +30,7 @@ function loadJSON (json, cb) {
   if (process.platform === 'browser') {
     return require('./utils.web').loadJSON(json, cb)
   }
-  cb(require(path.resolve(__dirname, '../../public/' + json)))
+  cb(require(path.resolve(globalThis.__prismarineViewerBase, json)))
 }
 
 module.exports = { loadTexture, loadJSON }

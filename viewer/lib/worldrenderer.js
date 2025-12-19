@@ -25,10 +25,14 @@ class WorldRenderer {
 
     this.workers = []
     for (let i = 0; i < numWorkers; i++) {
-      // Node environement needs an absolute path, but browser needs the url of the file
-      let src = __dirname
-      if (typeof window !== 'undefined') src = 'worker.js'
-      else src += '/worker.js'
+      // Node environment needs an absolute path, but browser needs the url of the file
+      // Note: __dirname would be baked in at compile time by Bun, so we use a runtime global
+      let src
+      if (typeof window !== 'undefined') {
+        src = 'worker.js'
+      } else {
+        src = globalThis.__prismarineViewerBase + '/worker.js'
+      }
 
       const worker = new Worker(src)
       worker.onmessage = ({ data }) => {
@@ -112,7 +116,7 @@ class WorldRenderer {
     for (const worker of this.workers) {
       worker.postMessage({ type: 'chunk', x, z, chunk })
     }
-    for (let y = 0; y < 256; y += 16) {
+    for (let y = -64; y < 320; y += 16) {
       const loc = new Vec3(x, y, z)
       this.setSectionDirty(loc)
       this.setSectionDirty(loc.offset(-16, 0, 0))
@@ -127,7 +131,7 @@ class WorldRenderer {
     for (const worker of this.workers) {
       worker.postMessage({ type: 'unloadChunk', x, z })
     }
-    for (let y = 0; y < 256; y += 16) {
+    for (let y = -64; y < 320; y += 16) {
       this.setSectionDirty(new Vec3(x, y, z), false)
       const key = `${x},${y},${z}`
       const mesh = this.sectionMeshs[key]
