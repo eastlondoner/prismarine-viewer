@@ -5,7 +5,15 @@ function safeRequire (path) {
     return {}
   }
 }
-const { loadImage } = globalThis.__canvasModule || safeRequire('node-canvas-webgl/lib')
+// Lazy getter for loadImage - allows canvas-embedded to set the global before we use it
+function getLoadImage() {
+  if (globalThis.__canvasModule?.loadImage) return globalThis.__canvasModule.loadImage
+  const mod = safeRequire('node-canvas-webgl/lib')
+  if (mod.loadImage) return mod.loadImage
+  // Last resort: try canvas directly
+  const canvas = safeRequire('canvas')
+  return canvas.loadImage
+}
 const THREE = require('three')
 const path = require('path')
 
@@ -19,7 +27,7 @@ function loadTexture (texture, cb) {
   if (textureCache[texture]) {
     cb(textureCache[texture])
   } else {
-    loadImage(path.resolve(globalThis.__prismarineViewerBase, texture)).then(image => {
+    getLoadImage()(path.resolve(globalThis.__prismarineViewerBase, texture)).then(image => {
       textureCache[texture] = new THREE.CanvasTexture(image)
       cb(textureCache[texture])
     })
