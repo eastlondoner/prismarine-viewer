@@ -27,9 +27,19 @@ function loadTexture (texture, cb) {
   if (textureCache[texture]) {
     cb(textureCache[texture])
   } else {
-    getLoadImage()(path.resolve(globalThis.__prismarineViewerBase, texture)).then(image => {
+    const loadImageFn = getLoadImage()
+    if (!loadImageFn) {
+      console.error('[loadTexture] ERROR: loadImage function not available!')
+      return
+    }
+    const fullPath = path.resolve(globalThis.__prismarineViewerBase, texture)
+    console.log('[loadTexture] Loading:', fullPath)
+    loadImageFn(fullPath).then(image => {
+      console.log('[loadTexture] Loaded successfully:', texture)
       textureCache[texture] = new THREE.CanvasTexture(image)
       cb(textureCache[texture])
+    }).catch(err => {
+      console.error('[loadTexture] ERROR loading', texture, ':', err.message)
     })
   }
 }
