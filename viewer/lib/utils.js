@@ -7,11 +7,18 @@ function safeRequire (path) {
 }
 // Lazy getter for loadImage - allows canvas-embedded to set the global before we use it
 function getLoadImage() {
-  if (globalThis.__canvasModule?.loadImage) return globalThis.__canvasModule.loadImage
+  if (globalThis.__canvasModule?.loadImage) {
+    console.log('[getLoadImage] Using globalThis.__canvasModule.loadImage')
+    return globalThis.__canvasModule.loadImage
+  }
   const mod = safeRequire('node-canvas-webgl/lib')
-  if (mod.loadImage) return mod.loadImage
+  if (mod.loadImage) {
+    console.log('[getLoadImage] Using node-canvas-webgl loadImage')
+    return mod.loadImage
+  }
   // Last resort: try canvas directly
   const canvas = safeRequire('canvas')
+  console.log('[getLoadImage] Using canvas loadImage:', !!canvas.loadImage)
   return canvas.loadImage
 }
 const THREE = require('three')
