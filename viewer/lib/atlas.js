@@ -17,14 +17,20 @@ function readTexture (basePath, name) {
   if (name === 'missing_texture.png') {
     // grab missing_texture.png from the viewer lib directory
     // Note: __dirname would be baked in at compile time by Bun, so we use a runtime global
-    basePath = globalThis.__prismarineViewerBase + '/viewer/lib'
+    // In prerender mode (build time), use __dirname; at runtime, use global
+    basePath = globalThis.__prismarineViewerBase 
+      ? globalThis.__prismarineViewerBase + '/viewer/lib'
+      : __dirname
   }
   return fs.readFileSync(path.join(basePath, name), 'base64')
 }
 
 function makeTextureAtlas (mcAssets) {
-  // Note: Use runtime global for Bun bundler compatibility
-  const blocksTexturePath = path.join(globalThis.__prismarineViewerBase + '/textures/' + mcAssets.version, 'blocks')
+  // Use mcAssets.directory when available (prerender/build time)
+  // Fall back to globalThis.__prismarineViewerBase for runtime (Bun bundler compatibility)
+  const blocksTexturePath = mcAssets.directory
+    ? path.join(mcAssets.directory, 'blocks')
+    : path.join(globalThis.__prismarineViewerBase + '/textures/' + mcAssets.version, 'blocks')
   const textureFiles = fs.readdirSync(blocksTexturePath).filter(file => file.endsWith('.png'))
   textureFiles.unshift('missing_texture.png')
 
