@@ -52,7 +52,9 @@ class WorldRenderer {
           geometry.setAttribute('normal', new THREE.BufferAttribute(data.geometry.normals, 3))
           geometry.setAttribute('color', new THREE.BufferAttribute(data.geometry.colors, 3))
           geometry.setAttribute('uv', new THREE.BufferAttribute(data.geometry.uvs, 2))
-          geometry.setIndex(data.geometry.indices)
+          if (data.geometry.indices) {
+            geometry.setIndex(new THREE.BufferAttribute(data.geometry.indices, 1))
+          }
 
           mesh = new THREE.Mesh(geometry, this.material)
           mesh.position.set(data.geometry.sx, data.geometry.sy, data.geometry.sz)
@@ -66,6 +68,55 @@ class WorldRenderer {
       if (worker.on) worker.on('message', (data) => { worker.onmessage({ data }) })
       this.workers.push(worker)
     }
+  }
+
+  // --- Bun/worker safety helpers ---
+  // mineflayer/prismarine-chunk column.toJson() includes Buffers/TypedArrays.
+  // On Bun, structured-clone of Buffer-like views can end up aliasing pooled backing stores,
+  // which manifests as "repeated/tiled textures" or corrupted chunk meshes over time.
+  // We defensively deep-copy Buffer/TypedArray payloads before posting to workers.
+  static __pvToOwnedUint8 (view) {
+    // Buffer is a Uint8Array subclass.
+    if (!view || !view.buffer) return view
+    // Copy only the exact bytes represented by this view.
+    const u8 = new Uint8Array(view.buffer, view.byteOffset || 0, view.byteLength || view.length || 0)
+    const out = new Uint8Array(u8.length)
+    out.set(u8)
+    return out
+  }
+
+  static __pvSanitizeForWorker (value, stats) {
+    // Primitives
+    if (value === null || value === undefined) return value
+    const t = typeof value
+    if (t === 'string' || t === 'number' || t === 'boolean') return value
+
+    // ArrayBuffer
+    if (value instanceof ArrayBuffer) {
+      stats.arrayBuffers++
+      return value.slice(0)
+    }
+
+    // TypedArray / Buffer / DataView
+    // eslint-disable-next-line no-undef
+    const isView = (typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView && ArrayBuffer.isView(value))
+    if (isView) {
+      // If it's a view, copy bytes and return a plain Uint8Array (safe across runtimes).
+      stats.views++
+      return WorldRenderer.__pvToOwnedUint8(value)
+    }
+
+    // Array
+    if (Array.isArray(value)) {
+      const out = new Array(value.length)
+      for (let i = 0; i < value.length; i++) out[i] = WorldRenderer.__pvSanitizeForWorker(value[i], stats)
+      return out
+    }
+
+    // Plain object
+    const out = {}
+    for (const [k, v] of Object.entries(value)) out[k] = WorldRenderer.__pvSanitizeForWorker(v, stats)
+    return out
   }
 
   resetWorld () {
@@ -113,8 +164,26 @@ class WorldRenderer {
 
   addColumn (x, z, chunk) {
     this.loadedChunks[`${x},${z}`] = true
+    // Sanitize the chunk payload once, then broadcast to workers.
+    // This is intentionally conservative for correctness; it may cost CPU.
+    let payload = chunk
+    if (!this.__pvChunkSanitizeLogged) {
+      this.__pvChunkSanitizeLogged = true
+      console.error('[PV_WORLDRENDERER] Bun safety: sanitizing chunk payloads before worker.postMessage')
+    }
+    const stats = { views: 0, arrayBuffers: 0 }
+    try {
+      payload = WorldRenderer.__pvSanitizeForWorker(chunk, stats)
+    } catch (e) {
+      console.error('[PV_WORLDRENDERER] chunk sanitize failed, sending raw chunk:', e)
+      payload = chunk
+    }
+    if (!this.__pvChunkSanitizeStatsLogged) {
+      this.__pvChunkSanitizeStatsLogged = true
+      console.error(`[PV_WORLDRENDERER] chunk sanitize stats: views=${stats.views} arrayBuffers=${stats.arrayBuffers}`)
+    }
     for (const worker of this.workers) {
-      worker.postMessage({ type: 'chunk', x, z, chunk })
+      worker.postMessage({ type: 'chunk', x, z, chunk: payload })
     }
     for (let y = -64; y < 320; y += 16) {
       const loc = new Vec3(x, y, z)

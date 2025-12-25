@@ -50,50 +50,58 @@ function prepareModel (model, texturesJson) {
   for (const elem of model.elements) {
     for (const sideName of Object.keys(elem.faces)) {
       const face = elem.faces[sideName]
+      try {
+        if (face.texture.charAt(0) === '#') {
+          face.texture = JSON.parse(JSON.stringify(model.textures[face.texture.substr(1)]))
+        } else if (
+          !(cleanupBlockName(face.texture) in texturesJson) &&
+          face.texture in model.textures
+        ) {
+          face.texture = JSON.parse(JSON.stringify(model.textures[face.texture]))
+        } else {
+          let name = face.texture
+          name = cleanupBlockName(name)
+          face.texture = JSON.parse(JSON.stringify(texturesJson[name]))
+        }
 
-      if (face.texture.charAt(0) === '#') {
-        face.texture = JSON.parse(JSON.stringify(model.textures[face.texture.substr(1)]))
-      } else if (
-        !(cleanupBlockName(face.texture) in texturesJson) &&
-        face.texture in model.textures
-      ) {
-        face.texture = JSON.parse(JSON.stringify(model.textures[face.texture]))
-      } else {
-        let name = face.texture
-        name = cleanupBlockName(name)
-        face.texture = JSON.parse(JSON.stringify(texturesJson[name]))
+        let uv = face.uv
+        if (!uv) {
+          const _from = elem.from
+          const _to = elem.to
+
+          // taken from https://github.com/DragonDev1906/Minecraft-Overviewer/
+          uv = {
+            north: [_to[0], 16 - _to[1], _from[0], 16 - _from[1]],
+            east: [_from[2], 16 - _to[1], _to[2], 16 - _from[1]],
+            south: [_from[0], 16 - _to[1], _to[0], 16 - _from[1]],
+            west: [_from[2], 16 - _to[1], _to[2], 16 - _from[1]],
+            up: [_from[0], _from[2], _to[0], _to[2]],
+            down: [_to[0], _from[2], _from[0], _to[2]]
+          }[sideName]
+        }
+
+        const su = (uv[2] - uv[0]) * face.texture.su / 16
+        const sv = (uv[3] - uv[1]) * face.texture.sv / 16
+        face.texture.bu = face.texture.u + 0.5 * face.texture.su
+        face.texture.bv = face.texture.v + 0.5 * face.texture.sv
+        face.texture.u += uv[0] * face.texture.su / 16
+        face.texture.v += uv[1] * face.texture.sv / 16
+        face.texture.su = su
+        face.texture.sv = sv
+      } catch (e) {
+        console.warn(`[modelsBuilder] Failed to resolve texture for face ${sideName}:`, e.message)
+        face.texture = { u: 0, v: 0, su: 0.015625, sv: 0.015625 }
       }
-
-      let uv = face.uv
-      if (!uv) {
-        const _from = elem.from
-        const _to = elem.to
-
-        // taken from https://github.com/DragonDev1906/Minecraft-Overviewer/
-        uv = {
-          north: [_to[0], 16 - _to[1], _from[0], 16 - _from[1]],
-          east: [_from[2], 16 - _to[1], _to[2], 16 - _from[1]],
-          south: [_from[0], 16 - _to[1], _to[0], 16 - _from[1]],
-          west: [_from[2], 16 - _to[1], _to[2], 16 - _from[1]],
-          up: [_from[0], _from[2], _to[0], _to[2]],
-          down: [_to[0], _from[2], _from[0], _to[2]]
-        }[sideName]
-      }
-
-      const su = (uv[2] - uv[0]) * face.texture.su / 16
-      const sv = (uv[3] - uv[1]) * face.texture.sv / 16
-      face.texture.bu = face.texture.u + 0.5 * face.texture.su
-      face.texture.bv = face.texture.v + 0.5 * face.texture.sv
-      face.texture.u += uv[0] * face.texture.su / 16
-      face.texture.v += uv[1] * face.texture.sv / 16
-      face.texture.su = su
-      face.texture.sv = sv
     }
   }
 }
 
 function resolveModel (name, blocksModels, texturesJson) {
   const model = getModel(name, blocksModels)
+  if (!model) {
+    console.warn(`[modelsBuilder] Could not resolve model: ${name}`)
+    return { textures: {}, elements: [], ao: true }
+  }
   prepareModel(model, texturesJson.textures)
   return model
 }

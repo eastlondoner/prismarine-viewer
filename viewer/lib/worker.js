@@ -77,8 +77,17 @@ setInterval(() => {
     if (chunk && chunk.sections[Math.floor(y / 16) - (chunk.minY !== undefined ? Math.floor(chunk.minY / 16) : 0)]) {
       delete dirtySections[key]
       const geometry = getSectionGeometry(x, y, z, world, blocksStates)
-      const transferable = [geometry.positions.buffer, geometry.normals.buffer, geometry.colors.buffer, geometry.uvs.buffer]
-      postMessage({ type: 'geometry', key, geometry }, transferable)
+
+      // Build transfer list of all ArrayBuffers backing the typed arrays
+      // This is zero-copy - buffers are moved, not cloned
+      const transferList = []
+      if (geometry.positions?.buffer) transferList.push(geometry.positions.buffer)
+      if (geometry.normals?.buffer) transferList.push(geometry.normals.buffer)
+      if (geometry.colors?.buffer) transferList.push(geometry.colors.buffer)
+      if (geometry.uvs?.buffer) transferList.push(geometry.uvs.buffer)
+      if (geometry.indices?.buffer) transferList.push(geometry.indices.buffer)
+
+      postMessage({ type: 'geometry', key, geometry }, transferList)
     }
     postMessage({ type: 'sectionFinished', key })
   }
