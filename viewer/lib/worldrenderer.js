@@ -53,7 +53,7 @@ class WorldRenderer {
           geometry.setAttribute('color', new THREE.BufferAttribute(data.geometry.colors, 3))
           geometry.setAttribute('uv', new THREE.BufferAttribute(data.geometry.uvs, 2))
           if (data.geometry.indices) {
-            geometry.setIndex(new THREE.BufferAttribute(data.geometry.indices, 1))
+            geometry.setIndex(data.geometry.indices)
           }
 
           mesh = new THREE.Mesh(geometry, this.material)
