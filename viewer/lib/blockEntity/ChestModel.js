@@ -10,10 +10,9 @@ const TEX_HEIGHT = 64
 // Facing direction to Y rotation (in radians)
 // Minecraft chests face the player when placed, latch faces outward
 // Our geometry has front (latch) at +Z, so we rotate to match facing direction
-// Added 180 degrees offset to correct front/back orientation
 const FACING_ROTATION = {
-  north: 0,           // latch faces -Z (north)
-  south: Math.PI,     // latch faces +Z (south)
+  north: Math.PI,     // latch faces -Z (north)
+  south: 0,           // latch faces +Z (south)
   east: Math.PI / 2,  // latch faces +X (east)
   west: -Math.PI / 2  // latch faces -X (west)
 }
@@ -51,7 +50,8 @@ function createBoxGeometry (origin, size, uvMap) {
   const indices = []
 
   // Helper to add a face
-  function addFace (verts, normal, uvStart, uvSize) {
+  // flipU/flipV allow correcting UV orientation for faces with different vertex orderings
+  function addFace (verts, normal, uvStart, uvSize, flipU = false, flipV = false) {
     const baseIndex = positions.length / 3
     for (const v of verts) {
       positions.push(v[0], v[1], v[2])
@@ -60,8 +60,12 @@ function createBoxGeometry (origin, size, uvMap) {
     // UV coordinates: [u, v] normalized 0-1
     // uvStart is top-left of the texture region, uvSize is [width, height] in pixels
     // With flipY=false: v=0 is top of image, v=1 is bottom
-    const [u0, v0] = uv(uvStart[0], uvStart[1]) // top-left of texture region
-    const [u1, v1] = uv(uvStart[0] + uvSize[0], uvStart[1] + uvSize[1]) // bottom-right
+    let [u0, v0] = uv(uvStart[0], uvStart[1]) // top-left of texture region
+    let [u1, v1] = uv(uvStart[0] + uvSize[0], uvStart[1] + uvSize[1]) // bottom-right
+
+    // Allow flipping UV axes for faces with non-standard vertex ordering
+    if (flipU) [u0, u1] = [u1, u0]
+    if (flipV) [v0, v1] = [v1, v0]
 
     // UVs for quad vertices: bottom-left, bottom-right, top-right, top-left (of the 3D face)
     // Map to texture: v1 is bottom of texture region, v0 is top
@@ -79,42 +83,46 @@ function createBoxGeometry (origin, size, uvMap) {
   if (uvMap.top) {
     addFace([
       [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]
-    ], [0, 1, 0], uvMap.top, [size[0], size[2]])
+    ], [0, 1, 0], uvMap.top, [size[0], size[2]], true, true)
   }
 
   // Bottom face (-Y) - looking up at XZ plane
+  // Vertex order gives CCW winding from -Y
+  // UV needs V flipped: 3D back (z0) should map to texture top, 3D front (z1) to texture bottom
+  // U stays normal: 3D left (x0) maps to texture left, 3D right (x1) to texture right
+  // Note: We rotate all faces 180 degrees (Flip U + Flip V) relative to standard to match texture orientation.
   if (uvMap.bottom) {
     addFace([
       [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]
-    ], [0, -1, 0], uvMap.bottom, [size[0], size[2]])
+    ], [0, -1, 0], uvMap.bottom, [size[0], size[2]], true, false)
   }
 
   // Front face (+Z / South) - looking at XY plane from +Z
   if (uvMap.south) {
     addFace([
       [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
-    ], [0, 0, 1], uvMap.south, [size[0], size[1]])
+    ], [0, 0, 1], uvMap.south, [size[0], size[1]], true, true)
   }
 
   // Back face (-Z / North) - looking at XY plane from -Z
   if (uvMap.north) {
     addFace([
       [x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]
-    ], [0, 0, -1], uvMap.north, [size[0], size[1]])
+    ], [0, 0, -1], uvMap.north, [size[0], size[1]], true, true)
   }
 
   // Right face (+X / East) - looking at ZY plane from +X
   if (uvMap.east) {
     addFace([
       [x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]
-    ], [1, 0, 0], uvMap.east, [size[2], size[1]])
+    ], [1, 0, 0], uvMap.east, [size[2], size[1]], true, true)
   }
 
   // Left face (-X / West) - looking at ZY plane from -X
   if (uvMap.west) {
     addFace([
       [x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]
-    ], [-1, 0, 0], uvMap.west, [size[2], size[1]])
+    ], [-1, 0, 0], uvMap.west, [size[2], size[1]], true, true)
   }
 
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
@@ -130,20 +138,20 @@ function createBoxGeometry (origin, size, uvMap) {
 // See: https://minecraft.wiki/w/File:Chest_(texture).png
 //
 // Lid (14x5x14):
-//   Top:    (14, 0)  14x14
-//   Bottom: (28, 0)  14x14 (inside of lid)
-//   Front:  (14, 14) 14x5  (the side that faces player, has latch)
-//   Back:   (28, 14) 14x5
-//   Left:   (0, 14)  14x5
-//   Right:  (42, 14) 14x5
+//   Top:    (28, 0)  14x14
+//   Bottom: (14, 0)  14x14 (inside of lid)
+//   Front:  (42, 14) 14x5  (the side that faces player, has latch)
+//   Back:   (14, 14) 14x5
+//   Left:   (28, 14) 14x5
+//   Right:  (0, 14)  14x5
 //
 // Base (14x10x14):
-//   Top:    not visible (inside)
-//   Bottom: (28, 19) 14x14
-//   Front:  (14, 33) 14x10
-//   Back:   (28, 33) 14x10
-//   Left:   (0, 33)  14x10
-//   Right:  (42, 33) 14x10
+//   Top:    (28, 19) 14x14 (inside of base)
+//   Bottom: (14, 19) 14x14
+//   Front:  (42, 33) 14x10
+//   Back:   (14, 33) 14x10
+//   Left:   (28, 33) 14x10
+//   Right:  (0, 33)  14x10
 //
 // Latch (2x4x1):
 //   Various small pieces
@@ -158,41 +166,43 @@ function createSingleChestGeometry () {
     [-7, 0, -7], // origin in pixels (centered at 0 in XZ)
     [14, 10, 14], // size in pixels
     {
-      top: null, // inside, not visible
-      bottom: [28, 19], // bottom of base (14x14 at y=19)
-      south: [14, 33], // front (14x10)
-      north: [28, 33], // back (14x10)
-      west: [0, 33], // left (14x10)
-      east: [42, 33] // right (14x10)
+      top: [28, 19], // inside, visible when open
+      bottom: [14, 19], // bottom of base (14x14 at y=19)
+      south: [42, 33], // front (14x10)
+      north: [14, 33], // back (14x10)
+      west: [28, 33], // left (14x10)
+      east: [0, 33] // right (14x10)
     }
   )
 
   // Lid: 14x5x14 pixels, centered at origin in XZ, starts at y=9
+  // Note: starts at y=9 to match vanilla.
+  // Texture layout: (14,0)=lid outer top, (28,0)=lid inner bottom
   const lidGeometry = createBoxGeometry(
     [-7, 9, -7], // origin (centered at 0 in XZ)
     [14, 5, 14], // size
     {
-      top: [14, 0], // top of lid
-      bottom: [28, 0], // inside of lid
-      south: [14, 14], // front (with latch area)
-      north: [28, 14], // back
-      west: [0, 14], // left
-      east: [42, 14] // right
+      top: [28, 0], // outer top of lid (visible when looking at closed chest)
+      bottom: [14, 0], // inner bottom visible when lid is open
+      south: [42, 14], // front (with latch area)
+      north: [14, 14], // back
+      west: [28, 14], // left
+      east: [0, 14] // right
     }
   )
 
   // Latch: 2x4x1, positioned at front center of lid
-  // Original position (7, 7, 15) -> centered: (-1, 7, 7)
+  // Moved up by 1 pixel along with lid to avoid z-fighting
   const latchGeometry = createBoxGeometry(
     [-1, 7, 7], // origin - front of chest, centered in X
     [2, 4, 1], // size
     {
       top: [1, 1],
-      bottom: [3, 1],
+      bottom: [3, 1], // Unused?
       south: [1, 1], // visible front
-      north: [3, 1],
-      west: [0, 1],
-      east: [2, 1]
+      north: [4, 1],
+      west: [3, 1],
+      east: [0, 1]
     }
   )
 
@@ -226,11 +236,6 @@ const ChestModel = {
     // For now, only handle single chests
     // Double chest left/right will need different geometry
     const { baseGeometry, lidGeometry, latchGeometry } = createSingleChestGeometry()
-
-    // Debug: log geometry info
-    console.log(`[ChestModel] Creating chest: type=${type}, facing=${facing}`)
-    console.log(`[ChestModel] Base geometry: ${baseGeometry.attributes.position.count} vertices, ${baseGeometry.index.count} indices`)
-    console.log(`[ChestModel] Lid geometry: ${lidGeometry.attributes.position.count} vertices, ${lidGeometry.index.count} indices`)
 
     // Create material
     const material = new THREE.MeshLambertMaterial({

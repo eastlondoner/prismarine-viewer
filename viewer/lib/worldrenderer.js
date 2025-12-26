@@ -63,6 +63,8 @@ class WorldRenderer {
         } else if (data.type === 'sectionFinished') {
           this.sectionsOutstanding.delete(data.key)
           this.renderUpdateEmitter.emit('update')
+        } else if (data.type === 'debug') {
+          console.error(`[WORKER ${i}] ${data.msg}`)
         }
       }
       if (worker.on) worker.on('message', (data) => { worker.onmessage({ data }) })
@@ -185,14 +187,18 @@ class WorldRenderer {
     for (const worker of this.workers) {
       worker.postMessage({ type: 'chunk', x, z, chunk: payload })
     }
-    for (let y = -64; y < 320; y += 16) {
-      const loc = new Vec3(x, y, z)
-      this.setSectionDirty(loc)
-      this.setSectionDirty(loc.offset(-16, 0, 0))
-      this.setSectionDirty(loc.offset(16, 0, 0))
-      this.setSectionDirty(loc.offset(0, 0, -16))
-      this.setSectionDirty(loc.offset(0, 0, 16))
-    }
+    // Small delay to ensure workers process chunk data before dirty messages
+    // This helps avoid race condition where geometry is generated before chunk is loaded
+    setTimeout(() => {
+      for (let y = -64; y < 320; y += 16) {
+        const loc = new Vec3(x, y, z)
+        this.setSectionDirty(loc)
+        this.setSectionDirty(loc.offset(-16, 0, 0))
+        this.setSectionDirty(loc.offset(16, 0, 0))
+        this.setSectionDirty(loc.offset(0, 0, -16))
+        this.setSectionDirty(loc.offset(0, 0, 16))
+      }
+    }, 0) // no delay, rely on worker pendingSections queue
   }
 
   removeColumn (x, z) {
