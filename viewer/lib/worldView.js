@@ -1,6 +1,7 @@
 const { spiral, ViewRect, chunkPos } = require('./simpleUtils')
 const { Vec3 } = require('vec3')
 const EventEmitter = require('events')
+const { isChestType, CHEST_TYPES } = require('./blockEntities')
 
 class WorldView extends EventEmitter {
   constructor (world, viewDistance, position = new Vec3(0, 0, 0), emitter = null) {
@@ -41,6 +42,29 @@ class WorldView extends EventEmitter {
       blockUpdate: function (oldBlock, newBlock) {
         const stateId = newBlock.stateId ? newBlock.stateId : ((newBlock.type << 4) | newBlock.metadata)
         worldView.emitter.emit('blockUpdate', { pos: oldBlock.position, stateId })
+
+        // Handle block entity add/remove
+        const oldIsChest = isChestType(oldBlock.name)
+        const newIsChest = isChestType(newBlock.name)
+
+        // If old block was a chest, emit delete
+        if (oldIsChest && !newIsChest) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: oldBlock.position.x, y: oldBlock.position.y, z: oldBlock.position.z },
+            delete: true
+          })
+        }
+
+        // If new block is a chest, emit add
+        if (newIsChest) {
+          const props = newBlock.getProperties ? newBlock.getProperties() : {}
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            chestType: props.type || 'single'
+          })
+        }
       }
     }
 
@@ -65,12 +89,14 @@ class WorldView extends EventEmitter {
 
   async init (pos) {
     const [botX, botZ] = chunkPos(pos)
+    console.error(`[WorldView.init] pos=(${pos.x?.toFixed(1)}, ${pos.y?.toFixed(1)}, ${pos.z?.toFixed(1)}) chunkPos=(${botX}, ${botZ})`)
 
     const positions = []
     spiral(this.viewDistance * 2, this.viewDistance * 2, (x, z) => {
       const p = new Vec3((botX + x) * 16, 0, (botZ + z) * 16)
       positions.push(p)
     })
+    console.error(`[WorldView.init] First chunk position: (${positions[0]?.x}, ${positions[0]?.z})`)
 
     this.lastPos.update(pos)
     await this._loadChunks(positions)
@@ -93,6 +119,42 @@ class WorldView extends EventEmitter {
         const chunk = column.toJson()
         this.emitter.emit('loadChunk', { x: pos.x, z: pos.z, chunk })
         this.loadedChunks[`${pos.x},${pos.z}`] = true
+
+        // Emit block entities from this chunk
+        this.emitBlockEntities(pos.x, pos.z, column)
+      }
+    }
+  }
+
+  emitBlockEntities (chunkX, chunkZ, column) {
+    // column.blockEntities is a dict keyed by "x,y,z" (relative positions within chunk)
+    if (!column.blockEntities) return
+
+    const entityCount = Object.keys(column.blockEntities).length
+    if (entityCount > 0) {
+      console.log(`[BlockEntity] Chunk (${chunkX}, ${chunkZ}) has ${entityCount} block entities`)
+    }
+
+    for (const [key, nbt] of Object.entries(column.blockEntities)) {
+      const [relX, y, relZ] = key.split(',').map(Number)
+      const worldX = chunkX + relX
+      const worldZ = chunkZ + relZ
+      const worldPos = new Vec3(worldX, y, worldZ)
+
+      // Get block at this position to determine type and properties
+      const block = this.world.getBlock(worldPos)
+      const blockName = block?.name || 'null'
+      const isChest = block ? isChestType(block.name) : false
+
+      if (isChest) {
+        console.log(`[BlockEntity] CHEST found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        const props = block.getProperties ? block.getProperties() : {}
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: block.name,
+          facing: props.facing || 'north',
+          chestType: props.type || 'single'
+        })
       }
     }
   }

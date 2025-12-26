@@ -2,6 +2,7 @@ const THREE = require('three')
 const TWEEN = require('@tweenjs/tween.js')
 const { WorldRenderer } = require('./worldrenderer')
 const { Entities } = require('./entities')
+const { BlockEntities } = require('./blockEntities')
 const { Primitives } = require('./primitives')
 const { getVersion } = require('./version')
 const { Vec3 } = require('vec3')
@@ -24,6 +25,7 @@ class Viewer {
 
     this.world = new WorldRenderer(this.scene)
     this.entities = new Entities(this.scene)
+    this.blockEntities = new BlockEntities(this.scene)
     this.primitives = new Primitives(this.scene, this.camera)
 
     this.domElement = renderer.domElement
@@ -34,6 +36,7 @@ class Viewer {
   resetAll () {
     this.world.resetWorld()
     this.entities.clear()
+    this.blockEntities.clear()
     this.primitives.clear()
   }
 
@@ -49,6 +52,7 @@ class Viewer {
     this.version = version
     this.world.setVersion(version)
     this.entities.clear()
+    this.blockEntities.setVersion(version)
     this.primitives.clear()
     return true
   }
@@ -97,10 +101,15 @@ class Viewer {
 
     emitter.on('unloadChunk', ({ x, z }) => {
       this.removeColumn(x, z)
+      this.blockEntities.removeChunk(Math.floor(x / 16), Math.floor(z / 16))
     })
 
     emitter.on('blockUpdate', ({ pos, stateId }) => {
       this.setBlockStateId(new Vec3(pos.x, pos.y, pos.z), stateId)
+    })
+
+    emitter.on('blockEntity', (be) => {
+      this.blockEntities.update(be)
     })
 
     this.domElement.addEventListener('pointerdown', (evt) => {
