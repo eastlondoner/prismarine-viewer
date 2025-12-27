@@ -69,7 +69,6 @@ class WorldView extends EventEmitter {
       chestLidMove: function (block, playerCount, block2) {
         // playerCount > 0 means chest is open, 0 means closed
         const isOpen = playerCount > 0
-        console.log(`[WorldView] chestLidMove: pos=(${block.position.x}, ${block.position.y}, ${block.position.z}) playerCount=${playerCount} isOpen=${isOpen}`)
         const props = block.getProperties ? block.getProperties() : {}
         worldView.emitter.emit('blockEntity', {
           pos: { x: block.position.x, y: block.position.y, z: block.position.z },
