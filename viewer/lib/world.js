@@ -24,11 +24,56 @@ class World {
     this.columns = {}
     this.blockCache = {}
     this.biomeCache = mcData(version).biomes
+    this.version = version
   }
 
-  addColumn (x, z, json) {
-    const chunk = this.Chunk.fromJson(json)
+  addColumn (x, z, payload) {
+    let chunk
+
+    // Handle different payload formats for high-performance Bun-native transfer
+    if (typeof payload === 'string') {
+      // Legacy: direct JSON string
+      chunk = this.Chunk.fromJson(payload)
+    } else if (payload && payload.type === 'json') {
+      // New format: wrapped JSON string
+      chunk = this.Chunk.fromJson(payload.data)
+    } else if (payload && payload.type === 'buffer') {
+      // High-performance: raw buffer + metadata (zero-copy transfer)
+      chunk = this.addColumnFromBuffer(x, z, payload.buffer, payload.metadata)
+    } else {
+      // Fallback: try to parse as object
+      console.error('[World] Unknown payload format, attempting JSON stringify:', typeof payload)
+      chunk = this.Chunk.fromJson(JSON.stringify(payload))
+    }
+
     this.columns[columnKey(x, z)] = chunk
+    return chunk
+  }
+
+  // High-performance chunk loading from raw buffer + metadata
+  // This enables zero-copy transfer of chunk data in Bun
+  addColumnFromBuffer (x, z, buffer, metadata) {
+    // Get minY from metadata - this varies by dimension:
+    // - Overworld: -64 (1.18+)
+    // - Nether: 0
+    // - End: 0
+    // - Custom dimensions: can be anything
+    const minY = metadata.minY ?? 0
+    const worldHeight = metadata.worldHeight ?? 384
+
+    const chunk = new this.Chunk({
+      minY,
+      worldHeight
+    })
+
+    // Load block/biome data from buffer
+    chunk.load(Buffer.from(buffer))
+
+    // Copy block entities
+    if (metadata.blockEntities) {
+      chunk.blockEntities = metadata.blockEntities
+    }
+
     return chunk
   }
 

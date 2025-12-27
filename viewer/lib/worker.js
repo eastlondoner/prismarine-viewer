@@ -22,78 +22,41 @@ function sectionKey (x, y, z) {
 }
 
 const dirtySections = {}
-// Track sections that need to be marked dirty once their chunk arrives
-const pendingSections = {}
 
 function setSectionDirty (pos, value = true) {
   const x = Math.floor(pos.x / 16) * 16
   const y = Math.floor(pos.y / 16) * 16
   const z = Math.floor(pos.z / 16) * 16
-  const chunk = world ? world.getColumn(x, z) : null
   const key = sectionKey(x, y, z)
-  const chunkKey = `${x},${z}`
   if (!value) {
     delete dirtySections[key]
-    delete pendingSections[key]
     postMessage({ type: 'sectionFinished', key })
-  } else if (chunk && chunk.sections[Math.floor(y / 16) - (chunk.minY !== undefined ? Math.floor(chunk.minY / 16) : 0)]) {
-    dirtySections[key] = value
-    delete pendingSections[key]
   } else {
-    // Chunk not loaded yet - defer this section until chunk arrives
-    pendingSections[key] = { x, y, z, chunkKey }
-    // Don't send sectionFinished yet - we'll process it when chunk arrives
+    // Always add to dirtySections - let setInterval handle retry if chunk not loaded yet
+    // This fixes the race condition where dirty message arrives before chunk message
+    dirtySections[key] = value
   }
 }
-
-// Process pending sections when a chunk is loaded
-function processPendingSectionsForChunk (chunkX, chunkZ) {
-  const chunkKey = `${chunkX},${chunkZ}`
-  for (const [key, pending] of Object.entries(pendingSections)) {
-    if (pending.chunkKey === chunkKey) {
-      // Re-attempt to mark as dirty now that chunk is loaded
-      const chunk = world.getColumn(pending.x, pending.z)
-      if (chunk && chunk.sections[Math.floor(pending.y / 16) - (chunk.minY !== undefined ? Math.floor(chunk.minY / 16) : 0)]) {
-        dirtySections[key] = true
-      } else {
-        postMessage({ type: 'sectionFinished', key })
-      }
-      delete pendingSections[key]
-    }
-  }
-}
-
-let msgSeq = 0
-let firstChunkTime = 0
-let firstDirtyTime = 0
 
 self.onmessage = ({ data }) => {
-  msgSeq++
   if (data.type === 'version') {
     world = new World(data.version)
   } else if (data.type === 'blockStates') {
     blocksStates = data.json
   } else if (data.type === 'dirty') {
-    if (!firstDirtyTime) {
-      firstDirtyTime = performance.now()
-      const pendingCount = Object.keys(pendingSections).length
-      const dirtyCount = Object.keys(dirtySections).length
-      postMessage({ type: 'debug', msg: `First dirty at seq=${msgSeq}, firstChunk was at ${firstChunkTime ? (firstDirtyTime - firstChunkTime).toFixed(1) + 'ms ago' : 'NOT YET'}, pending=${pendingCount}, dirty=${dirtyCount}` })
-    }
     const loc = new Vec3(data.x, data.y, data.z)
     setSectionDirty(loc, data.value)
   } else if (data.type === 'chunk') {
-    if (!firstChunkTime) {
-      firstChunkTime = performance.now()
-      postMessage({ type: 'debug', msg: `First chunk at seq=${msgSeq}, firstDirty was at ${firstDirtyTime ? 'ALREADY (bad!)' : 'not yet (good)'}` })
+    // Handle chunk with error logging for debugging
+    try {
+      if (!world) {
+        // postMessage({ type: 'debug', msg: `Chunk received before world initialized at ${data.x},${data.z}` })
+        return
+      }
+      world.addColumn(data.x, data.z, data.chunk)
+    } catch (err) {
+      postMessage({ type: 'debug', msg: `Failed to load chunk ${data.x},${data.z}: ${err.message}` })
     }
-    // Force memory synchronization for Bun shared buffers
-    // Reading a value can trigger a memory barrier
-    const chunkStr = typeof data.chunk === 'string' ? data.chunk : JSON.stringify(data.chunk)
-    const parsed = JSON.parse(chunkStr)
-    world.addColumn(data.x, data.z, parsed)
-    // Process any sections that were waiting for this chunk
-    processPendingSectionsForChunk(data.x, data.z)
   } else if (data.type === 'unloadChunk') {
     world.removeColumn(data.x, data.z)
   } else if (data.type === 'blockUpdate') {
@@ -122,17 +85,8 @@ setInterval(() => {
     if (chunk && chunk.sections[Math.floor(y / 16) - (chunk.minY !== undefined ? Math.floor(chunk.minY / 16) : 0)]) {
       delete dirtySections[key]
       const geometry = getSectionGeometry(x, y, z, world, blocksStates)
-
-      // Build transfer list of all ArrayBuffers backing the typed arrays
-      // This is zero-copy - buffers are moved, not cloned
-      const transferList = []
-      if (geometry.positions?.buffer) transferList.push(geometry.positions.buffer)
-      if (geometry.normals?.buffer) transferList.push(geometry.normals.buffer)
-      if (geometry.colors?.buffer) transferList.push(geometry.colors.buffer)
-      if (geometry.uvs?.buffer) transferList.push(geometry.uvs.buffer)
-      if (geometry.indices?.buffer) transferList.push(geometry.indices.buffer)
-
-      postMessage({ type: 'geometry', key, geometry }, transferList)
+      const transferable = [geometry.positions.buffer, geometry.normals.buffer, geometry.colors.buffer, geometry.uvs.buffer]
+      postMessage({ type: 'geometry', key, geometry }, transferable)
     }
     postMessage({ type: 'sectionFinished', key })
   }

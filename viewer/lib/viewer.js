@@ -23,7 +23,9 @@ class Viewer {
     const size = renderer.getSize(new THREE.Vector2())
     this.camera = new THREE.PerspectiveCamera(75, size.x / size.y, 0.1, 1000)
 
-    this.world = new WorldRenderer(this.scene)
+    // Force 1 worker to fix race condition between chunk and dirty messages
+    // See INTERMITTENT_INITIAL_RENDERING_BUG.md for details
+    this.world = new WorldRenderer(this.scene, 1)
     this.entities = new Entities(this.scene)
     this.blockEntities = new BlockEntities(this.scene)
     this.primitives = new Primitives(this.scene, this.camera)

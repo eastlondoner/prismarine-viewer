@@ -1,4 +1,5 @@
 const THREE = require('three')
+const TWEEN = require('@tweenjs/tween.js')
 const { dispose3 } = require('./dispose')
 const ChestModel = require('./blockEntity/ChestModel')
 
@@ -50,8 +51,18 @@ class BlockEntities {
     // Skip if no version set
     if (!this.version) return
 
+    // Handle open state change for existing chests
+    const existing = this.blockEntities[key]
+    if (blockEntity.open !== undefined) {
+      console.log(`[BlockEntities] update with open=${blockEntity.open} key=${key} existing=${!!existing}`)
+    }
+    if (existing && blockEntity.open !== undefined) {
+      this.animateChestLid(existing, blockEntity.open)
+      return
+    }
+
     // Skip if already exists (block entities don't move)
-    if (this.blockEntities[key]) return
+    if (existing) return
 
     // Create mesh based on block entity type
     const mesh = this.createMesh(blockEntity)
@@ -66,6 +77,21 @@ class BlockEntities {
 
     this.blockEntities[key] = mesh
     this.scene.add(mesh)
+  }
+
+  animateChestLid (mesh, isOpen) {
+    const lidPivot = mesh.userData.lidPivot
+    console.log(`[BlockEntities] animateChestLid isOpen=${isOpen} lidPivot=${!!lidPivot}`)
+    if (!lidPivot) return
+
+    // Target angle: 0 = closed, -PI/2 = fully open (negative to pivot backward)
+    const targetAngle = isOpen ? -Math.PI / 2 : 0
+    console.log(`[BlockEntities] animating lid from ${lidPivot.rotation.x} to ${targetAngle}`)
+
+    new TWEEN.Tween(lidPivot.rotation)
+      .to({ x: targetAngle }, 300) // 300ms animation
+      .easing(TWEEN.Easing.Quadratic.Out)
+      .start()
   }
 
   createMesh (blockEntity) {

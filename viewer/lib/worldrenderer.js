@@ -25,13 +25,14 @@ class WorldRenderer {
 
     this.workers = []
     for (let i = 0; i < numWorkers; i++) {
-      // Node environment needs an absolute path, but browser needs the url of the file
-      // Note: __dirname would be baked in at compile time by Bun, so we use a runtime global
+      // Node/Bun: load worker source directly (Bun transpiles on-the-fly)
+      // Browser: load from relative URL
       let src
       if (typeof window !== 'undefined') {
         src = 'worker.js'
       } else {
-        src = globalThis.__prismarineViewerBase + '/worker.js'
+        // Use source file directly - Bun handles transpilation
+        src = globalThis.__prismarineViewerWorkerPath || (globalThis.__prismarineViewerBase + '/worker.js')
       }
 
       const worker = new Worker(src)
@@ -72,55 +73,6 @@ class WorldRenderer {
     }
   }
 
-  // --- Bun/worker safety helpers ---
-  // mineflayer/prismarine-chunk column.toJson() includes Buffers/TypedArrays.
-  // On Bun, structured-clone of Buffer-like views can end up aliasing pooled backing stores,
-  // which manifests as "repeated/tiled textures" or corrupted chunk meshes over time.
-  // We defensively deep-copy Buffer/TypedArray payloads before posting to workers.
-  static __pvToOwnedUint8 (view) {
-    // Buffer is a Uint8Array subclass.
-    if (!view || !view.buffer) return view
-    // Copy only the exact bytes represented by this view.
-    const u8 = new Uint8Array(view.buffer, view.byteOffset || 0, view.byteLength || view.length || 0)
-    const out = new Uint8Array(u8.length)
-    out.set(u8)
-    return out
-  }
-
-  static __pvSanitizeForWorker (value, stats) {
-    // Primitives
-    if (value === null || value === undefined) return value
-    const t = typeof value
-    if (t === 'string' || t === 'number' || t === 'boolean') return value
-
-    // ArrayBuffer
-    if (value instanceof ArrayBuffer) {
-      stats.arrayBuffers++
-      return value.slice(0)
-    }
-
-    // TypedArray / Buffer / DataView
-    // eslint-disable-next-line no-undef
-    const isView = (typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView && ArrayBuffer.isView(value))
-    if (isView) {
-      // If it's a view, copy bytes and return a plain Uint8Array (safe across runtimes).
-      stats.views++
-      return WorldRenderer.__pvToOwnedUint8(value)
-    }
-
-    // Array
-    if (Array.isArray(value)) {
-      const out = new Array(value.length)
-      for (let i = 0; i < value.length; i++) out[i] = WorldRenderer.__pvSanitizeForWorker(value[i], stats)
-      return out
-    }
-
-    // Plain object
-    const out = {}
-    for (const [k, v] of Object.entries(value)) out[k] = WorldRenderer.__pvSanitizeForWorker(v, stats)
-    return out
-  }
-
   resetWorld () {
     this.active = false
     for (const mesh of Object.values(this.sectionMeshs)) {
@@ -136,8 +88,8 @@ class WorldRenderer {
     this.version = version
     this.resetWorld()
     this.active = true
-    for (const worker of this.workers) {
-      worker.postMessage({ type: 'version', version })
+    for (let i = 0; i < this.workers.length; i++) {
+      this.workers[i].postMessage({ type: 'version', version, workerIndex: i, numWorkers: this.workers.length })
     }
 
     this.updateTexturesData()
@@ -166,27 +118,68 @@ class WorldRenderer {
 
   addColumn (x, z, chunk) {
     this.loadedChunks[`${x},${z}`] = true
-    // Sanitize the chunk payload once, then broadcast to workers.
-    // This is intentionally conservative for correctness; it may cost CPU.
-    let payload = chunk
-    if (!this.__pvChunkSanitizeLogged) {
-      this.__pvChunkSanitizeLogged = true
-      console.error('[PV_WORLDRENDERER] Bun safety: sanitizing chunk payloads before worker.postMessage')
+
+    // High-performance Bun-native chunk transfer:
+    // - If chunk is a ChunkColumn object, extract buffer + metadata for zero-copy transfer
+    // - If chunk is already a JSON string (from toJson()), pass it directly
+    // - This preserves minY and other critical metadata while enabling efficient buffer transfer
+
+    let payload
+    let transferables = []
+
+    if (typeof chunk === 'string') {
+      // Already serialized (from worldView.loadChunk -> column.toJson())
+      // Pass directly - Bun handles strings efficiently
+      payload = { type: 'json', data: chunk }
+    } else if (chunk && typeof chunk.dump === 'function') {
+      // ChunkColumn object - extract raw buffer + metadata for zero-copy transfer
+      const buffer = chunk.dump()
+      // Ensure we have an owned copy of the buffer (avoid Bun aliasing issues)
+      const ownedBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+
+      payload = {
+        type: 'buffer',
+        buffer: ownedBuffer,
+        metadata: {
+          minY: chunk.minY,
+          worldHeight: chunk.worldHeight,
+          // Light data needs separate handling if present
+          skyLightMask: chunk.skyLightMask?.toLongArray?.() ?? null,
+          blockLightMask: chunk.blockLightMask?.toLongArray?.() ?? null,
+          emptySkyLightMask: chunk.emptySkyLightMask?.toLongArray?.() ?? null,
+          emptyBlockLightMask: chunk.emptyBlockLightMask?.toLongArray?.() ?? null,
+          blockEntities: chunk.blockEntities ?? {}
+        }
+      }
+      // Transfer the buffer zero-copy
+      transferables = [ownedBuffer]
+    } else if (chunk && typeof chunk === 'object') {
+      // Plain object (possibly already parsed JSON) - re-serialize to ensure correct format
+      payload = { type: 'json', data: JSON.stringify(chunk) }
+    } else {
+      console.error('[PV_WORLDRENDERER] Unknown chunk format:', typeof chunk)
+      return
     }
-    const stats = { views: 0, arrayBuffers: 0 }
-    try {
-      payload = WorldRenderer.__pvSanitizeForWorker(chunk, stats)
-    } catch (e) {
-      console.error('[PV_WORLDRENDERER] chunk sanitize failed, sending raw chunk:', e)
-      payload = chunk
-    }
-    if (!this.__pvChunkSanitizeStatsLogged) {
-      this.__pvChunkSanitizeStatsLogged = true
-      console.error(`[PV_WORLDRENDERER] chunk sanitize stats: views=${stats.views} arrayBuffers=${stats.arrayBuffers}`)
-    }
+
     for (const worker of this.workers) {
-      worker.postMessage({ type: 'chunk', x, z, chunk: payload })
+      // Use structured clone with transferables for zero-copy buffer transfer
+      if (transferables.length > 0) {
+        // Clone payload for each worker since buffer can only be transferred once
+        const workerPayload = {
+          type: 'chunk',
+          x,
+          z,
+          chunk: {
+            ...payload,
+            buffer: payload.buffer ? payload.buffer.slice(0) : undefined
+          }
+        }
+        worker.postMessage(workerPayload)
+      } else {
+        worker.postMessage({ type: 'chunk', x, z, chunk: payload })
+      }
     }
+
     // Small delay to ensure workers process chunk data before dirty messages
     // This helps avoid race condition where geometry is generated before chunk is loaded
     setTimeout(() => {
@@ -198,7 +191,7 @@ class WorldRenderer {
         this.setSectionDirty(loc.offset(0, 0, -16))
         this.setSectionDirty(loc.offset(0, 0, 16))
       }
-    }, 0) // no delay, rely on worker pendingSections queue
+    }, 50)
   }
 
   removeColumn (x, z) {

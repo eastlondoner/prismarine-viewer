@@ -175,11 +175,11 @@ function createSingleChestGeometry () {
     }
   )
 
-  // Lid: 14x5x14 pixels, centered at origin in XZ, starts at y=9
-  // Note: starts at y=9 to match vanilla.
-  // Texture layout: (14,0)=lid outer top, (28,0)=lid inner bottom
+  // Lid and latch geometries are now relative to the PIVOT GROUP
+  // Pivot is at (0, 9, -7) in pixels - the back hinge of the lid
+  // So lid origin shifts from [-7, 9, -7] to [-7, 0, 0] in pivot space
   const lidGeometry = createBoxGeometry(
-    [-7, 9, -7], // origin (centered at 0 in XZ)
+    [-7, 0, 0], // origin relative to pivot (was [-7, 9, -7])
     [14, 5, 14], // size
     {
       top: [28, 0], // outer top of lid (visible when looking at closed chest)
@@ -192,9 +192,10 @@ function createSingleChestGeometry () {
   )
 
   // Latch: 2x4x1, positioned at front center of lid
-  // Moved up by 1 pixel along with lid to avoid z-fighting
+  // Original origin: [-1, 7, 7], pivot at (0, 9, -7)
+  // New origin in pivot space: [-1, 7-9, 7-(-7)] = [-1, -2, 14]
   const latchGeometry = createBoxGeometry(
-    [-1, 7, 7], // origin - front of chest, centered in X
+    [-1, -2, 14], // origin relative to pivot (was [-1, 7, 7])
     [2, 4, 1], // size
     {
       top: [1, 1],
@@ -259,15 +260,25 @@ const ChestModel = {
     baseMesh.name = 'base'
     group.add(baseMesh)
 
-    // Create lid mesh (simplified - no pivot group for now)
+    // Create lid pivot group at the hinge location (back edge of lid)
+    // Pivot is at (0, 9, -7) in pixels = (0, 9/16, -7/16) in blocks
+    const lidPivot = new THREE.Group()
+    lidPivot.name = 'lidPivot'
+    lidPivot.position.set(0, 9 / 16, -7 / 16)
+    group.add(lidPivot)
+
+    // Create lid mesh and add to pivot (geometry is now relative to pivot)
     const lidMesh = new THREE.Mesh(lidGeometry, material)
     lidMesh.name = 'lid'
-    group.add(lidMesh)
+    lidPivot.add(lidMesh)
 
-    // Create latch mesh
+    // Create latch mesh and add to pivot (moves with lid)
     const latchMesh = new THREE.Mesh(latchGeometry, material)
     latchMesh.name = 'latch'
-    group.add(latchMesh)
+    lidPivot.add(latchMesh)
+
+    // Store lidPivot for animation
+    group.userData.lidPivot = lidPivot
 
     // Apply facing rotation
     // The chest model faces +Z by default (south), rotate based on facing
@@ -277,11 +288,13 @@ const ChestModel = {
     return group
   },
 
-  // Animation helper (for future use)
+  // Animation helper - rotates the lid pivot around the X axis
+  // angle: 0 = closed, Math.PI/2 = fully open
   setLidAngle (mesh, angle) {
-    if (mesh.userData.lid) {
-      // Negative X rotation opens the lid (pivots at back edge)
-      mesh.userData.lid.rotation.x = -angle
+    const lidPivot = mesh.userData.lidPivot
+    if (lidPivot) {
+      // Negative X rotation opens the lid (pivots backward at back edge)
+      lidPivot.rotation.x = -angle
     }
   }
 }

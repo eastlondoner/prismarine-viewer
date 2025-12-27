@@ -65,6 +65,30 @@ class WorldView extends EventEmitter {
             chestType: props.type || 'single'
           })
         }
+      },
+      chestLidMove: function (block, playerCount, block2) {
+        // playerCount > 0 means chest is open, 0 means closed
+        const isOpen = playerCount > 0
+        console.log(`[WorldView] chestLidMove: pos=(${block.position.x}, ${block.position.y}, ${block.position.z}) playerCount=${playerCount} isOpen=${isOpen}`)
+        const props = block.getProperties ? block.getProperties() : {}
+        worldView.emitter.emit('blockEntity', {
+          pos: { x: block.position.x, y: block.position.y, z: block.position.z },
+          type: block.name,
+          facing: props.facing || 'north',
+          chestType: props.type || 'single',
+          open: isOpen
+        })
+        // Handle double chest second block
+        if (block2) {
+          const props2 = block2.getProperties ? block2.getProperties() : {}
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: block2.position.x, y: block2.position.y, z: block2.position.z },
+            type: block2.name,
+            facing: props2.facing || 'north',
+            chestType: props2.type || 'single',
+            open: isOpen
+          })
+        }
       }
     }
 
