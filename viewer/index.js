@@ -4,5 +4,7 @@ module.exports = {
   MapControls: require('./lib/controls').MapControls,
   Entity: require('./lib/entity/Entity'),
   getBufferFromStream: require('./lib/simpleUtils').getBufferFromStream,
-  supportedVersions: require('./lib/version').supportedVersions
+  supportedVersions: require('./lib/version').supportedVersions,
+  isChestType: require('./lib/blockEntities').isChestType,
+  CHEST_TYPES: require('./lib/blockEntities').CHEST_TYPES
 }
