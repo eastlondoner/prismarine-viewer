@@ -1,7 +1,9 @@
 const { spiral, ViewRect, chunkPos } = require('./simpleUtils')
 const { Vec3 } = require('vec3')
 const EventEmitter = require('events')
-const { isChestType, CHEST_TYPES } = require('./blockEntities')
+const { isChestType, isShulkerType, isBedType, isSignType, isBannerType, isBellType, isSkullType, isCampfireType, isBlockEntityType } = require('./blockEntities')
+
+console.log('[WorldView] Module loaded with blockPlaced support V2')
 
 class WorldView extends EventEmitter {
   constructor (world, viewDistance, position = new Vec3(0, 0, 0), emitter = null) {
@@ -44,26 +46,82 @@ class WorldView extends EventEmitter {
         worldView.emitter.emit('blockUpdate', { pos: oldBlock.position, stateId })
 
         // Handle block entity add/remove
-        const oldIsChest = isChestType(oldBlock.name)
-        const newIsChest = isChestType(newBlock.name)
+        const oldIsBlockEntity = isBlockEntityType(oldBlock.name)
+        const newIsBlockEntity = isBlockEntityType(newBlock.name)
 
-        // If old block was a chest, emit delete
-        if (oldIsChest && !newIsChest) {
+        // Debug: log block entity detection
+        if (oldIsBlockEntity || newIsBlockEntity) {
+          console.log(`[BlockEntity] blockUpdate: old=${oldBlock.name} (isBlockEntity=${oldIsBlockEntity}), new=${newBlock.name} (isBlockEntity=${newIsBlockEntity})`)
+        }
+
+        // If old block was a block entity, emit delete
+        if (oldIsBlockEntity && !newIsBlockEntity) {
           worldView.emitter.emit('blockEntity', {
             pos: { x: oldBlock.position.x, y: oldBlock.position.y, z: oldBlock.position.z },
             delete: true
           })
         }
 
-        // If new block is a chest, emit add
-        if (newIsChest) {
+        // If new block is a block entity, emit add
+        if (newIsBlockEntity) {
           const props = newBlock.getProperties ? newBlock.getProperties() : {}
-          worldView.emitter.emit('blockEntity', {
-            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
-            type: newBlock.name,
-            facing: props.facing || 'north',
-            chestType: props.type || 'single'
-          })
+
+          if (isChestType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              chestType: props.type || 'single'
+            })
+          } else if (isShulkerType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'up'
+            })
+          } else if (isBedType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              part: props.part || 'foot'
+            })
+          } else if (isSignType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              rotation: parseInt(props.rotation) || 0
+            })
+          } else if (isBannerType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              rotation: parseInt(props.rotation) || 0
+            })
+          } else if (isBellType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              attachment: props.attachment || 'floor'
+            })
+          } else if (isSkullType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              rotation: parseInt(props.rotation) || 0
+            })
+          } else if (isCampfireType(newBlock.name)) {
+            worldView.emitter.emit('blockEntity', {
+              pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+              type: newBlock.name,
+              facing: props.facing || 'north',
+              lit: props.lit !== 'false'
+            })
+          }
         }
       },
       chestLidMove: function (block, playerCount, block2) {
@@ -88,12 +146,84 @@ class WorldView extends EventEmitter {
             open: isOpen
           })
         }
+      },
+      blockPlaced: function (oldBlock, newBlock) {
+        // Handle block entity creation when player places a block
+        // This is needed because blockUpdate doesn't fire for player-placed blocks
+        console.log(`[BlockEntity V2 ${Date.now()}] blockPlaced: old=${oldBlock?.name}, new=${newBlock?.name}`)
+
+        if (!newBlock) return
+
+        const newIsBlockEntity = isBlockEntityType(newBlock.name)
+        if (!newIsBlockEntity) return
+
+        const props = newBlock.getProperties ? newBlock.getProperties() : {}
+        console.log(`[BlockEntity] Creating block entity for ${newBlock.name} at (${newBlock.position.x}, ${newBlock.position.y}, ${newBlock.position.z})`)
+
+        if (isChestType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            chestType: props.type || 'single'
+          })
+        } else if (isShulkerType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'up'
+          })
+        } else if (isBedType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            part: props.part || 'foot'
+          })
+        } else if (isSignType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            rotation: parseInt(props.rotation) || 0
+          })
+        } else if (isBannerType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            rotation: parseInt(props.rotation) || 0
+          })
+        } else if (isBellType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            attachment: props.attachment || 'floor'
+          })
+        } else if (isSkullType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            rotation: parseInt(props.rotation) || 0
+          })
+        } else if (isCampfireType(newBlock.name)) {
+          worldView.emitter.emit('blockEntity', {
+            pos: { x: newBlock.position.x, y: newBlock.position.y, z: newBlock.position.z },
+            type: newBlock.name,
+            facing: props.facing || 'north',
+            lit: props.lit !== 'false'
+          })
+        }
       }
     }
 
     for (const [evt, listener] of Object.entries(this.listeners[bot.username])) {
+      console.log(`[WorldView] Registering listener for event: ${evt}`)
       bot.on(evt, listener)
     }
+    console.log(`[WorldView] Registered ${Object.keys(this.listeners[bot.username]).length} listeners for bot ${bot.username}`)
 
     for (const id in bot.entities) {
       const e = bot.entities[id]
@@ -166,17 +296,73 @@ class WorldView extends EventEmitter {
 
       // Get block at this position to determine type and properties
       const block = this.world.getBlock(worldPos)
-      const blockName = block?.name || 'null'
-      const isChest = block ? isChestType(block.name) : false
+      if (!block) continue
 
-      if (isChest) {
+      const blockName = block.name
+      const props = block.getProperties ? block.getProperties() : {}
+
+      if (isChestType(blockName)) {
         console.log(`[BlockEntity] CHEST found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
-        const props = block.getProperties ? block.getProperties() : {}
         this.emitter.emit('blockEntity', {
           pos: { x: worldX, y, z: worldZ },
-          type: block.name,
+          type: blockName,
           facing: props.facing || 'north',
           chestType: props.type || 'single'
+        })
+      } else if (isShulkerType(blockName)) {
+        console.log(`[BlockEntity] SHULKER found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'up'
+        })
+      } else if (isBedType(blockName)) {
+        console.log(`[BlockEntity] BED found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          part: props.part || 'foot'
+        })
+      } else if (isSignType(blockName)) {
+        console.log(`[BlockEntity] SIGN found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          rotation: parseInt(props.rotation) || 0
+        })
+      } else if (isBannerType(blockName)) {
+        console.log(`[BlockEntity] BANNER found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          rotation: parseInt(props.rotation) || 0
+        })
+      } else if (isBellType(blockName)) {
+        console.log(`[BlockEntity] BELL found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          attachment: props.attachment || 'floor'
+        })
+      } else if (isSkullType(blockName)) {
+        console.log(`[BlockEntity] SKULL found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          rotation: parseInt(props.rotation) || 0
+        })
+      } else if (isCampfireType(blockName)) {
+        console.log(`[BlockEntity] CAMPFIRE found at (${worldX}, ${y}, ${worldZ}): ${blockName}`)
+        this.emitter.emit('blockEntity', {
+          pos: { x: worldX, y, z: worldZ },
+          type: blockName,
+          facing: props.facing || 'north',
+          lit: props.lit !== 'false'
         })
       }
     }

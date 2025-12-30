@@ -111,6 +111,7 @@ class Viewer {
     })
 
     emitter.on('blockEntity', (be) => {
+      console.log(`[Viewer] Received blockEntity event:`, JSON.stringify(be))
       this.blockEntities.update(be)
     })
 
